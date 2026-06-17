@@ -1,0 +1,301 @@
+# 💬 FAQ App
+
+A full-stack FAQ management web application built with the **MERN stack** (MongoDB, Express.js, React, Node.js). Users authenticate via **Google OAuth 2.0**, can post questions and answers, reply to existing FAQs, and admins have full control to edit or delete content.
+
+---
+
+## 📑 Table of Contents
+
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Database Models](#database-models)
+- [API Endpoints](#api-endpoints)
+- [Pages & Routes](#pages--routes)
+- [Authentication Flow](#authentication-flow)
+- [Role-Based Access Control](#role-based-access-control)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Environment Variables](#environment-variables)
+  - [Running the App](#running-the-app)
+- [Contributing](#contributing)
+
+---
+
+## ✨ Features
+
+- **Google OAuth 2.0 Login** — secure sign-in using Google accounts, no passwords required
+- **JWT Authentication** — stateless token-based auth stored in `localStorage`
+- **Post FAQs** — authenticated users can submit questions with answers
+- **Reply to FAQs** — users can add replies to any existing FAQ
+- **Admin Panel** — admins can edit or delete any FAQ
+- **Role-Based Access** — `student` and `admin` roles with different permissions
+- **Public FAQ Browsing** — the home page is accessible without login
+- **Responsive UI** — clean, card-based layout that works across screen sizes
+
+---
+
+## 🛠 Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18, React Router v6, Axios |
+| Backend | Node.js, Express.js 5 |
+| Database | MongoDB (Mongoose ODM) |
+| Authentication | Google OAuth 2.0 (Passport.js), JWT (jsonwebtoken) |
+| Styling | Inline CSS (React style objects) |
+
+---
+
+## 📁 Project Structure
+
+```
+FAQ_project/
+├── backend/
+│   ├── config/
+│   │   └── passport.js        # Google OAuth strategy setup
+│   ├── models/
+│   │   ├── User.js            # User schema (googleId, name, email, role)
+│   │   └── FAQ.js             # FAQ schema with embedded replies
+│   ├── routes/
+│   │   ├── auth.js            # /auth routes (Google login, JWT, logout)
+│   │   └── faq.js             # /faq routes (CRUD + replies)
+│   ├── index.js               # Express app entry point
+│   ├── package.json
+│   └── .env                   # Environment variables (not committed)
+│
+└── frontend/
+    ├── public/
+    ├── src/
+    │   ├── components/
+    │   │   ├── Navbar.js          # Top navigation bar
+    │   │   └── PrivateRoute.js    # Route guard for authenticated pages
+    │   ├── pages/
+    │   │   ├── Home.js            # Public FAQ listing
+    │   │   ├── Login.js           # Google sign-in page
+    │   │   ├── AuthSuccess.js     # Handles token from OAuth callback
+    │   │   ├── Dashboard.js       # User dashboard with navigation cards
+    │   │   ├── AddFAQ.js          # Form to submit a new FAQ
+    │   │   ├── FAQReplies.js      # View FAQs and post replies
+    │   │   └── AdminPanel.js      # Admin edit/delete interface
+    │   ├── App.js                 # Root component, routing, auth state
+    │   └── index.js               # React entry point
+    └── package.json
+```
+
+---
+
+## 🗄 Database Models
+
+### User
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `googleId` | String | Unique Google account ID |
+| `name` | String | Display name from Google profile |
+| `email` | String | Email from Google profile |
+| `role` | String | `student` (default) or `admin` |
+| `createdAt` | Date | Account creation timestamp |
+
+### FAQ
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `question` | String | The FAQ question |
+| `answer` | String | The answer to the question |
+| `createdBy` | String | Name of the user who posted it |
+| `replies` | Array | Embedded array of reply objects |
+| `createdAt` | Date | Creation timestamp |
+
+**Reply (embedded in FAQ):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `text` | String | Reply content |
+| `createdBy` | String | Name of the replying user |
+| `createdAt` | Date | Reply timestamp |
+
+---
+
+## 🔌 API Endpoints
+
+### Auth Routes — `/auth`
+
+| Method | Endpoint | Access | Description |
+|--------|----------|--------|-------------|
+| GET | `/auth/google` | Public | Initiates Google OAuth login |
+| GET | `/auth/google/callback` | Public | OAuth callback; redirects with JWT |
+| GET | `/auth/current-user` | Bearer Token | Returns current user from JWT |
+| GET | `/auth/logout` | Public | Instructs frontend to clear token |
+
+### FAQ Routes — `/faq`
+
+| Method | Endpoint | Access | Description |
+|--------|----------|--------|-------------|
+| GET | `/faq` | Public | Fetch all FAQs (newest first) |
+| POST | `/faq/add` | Authenticated | Create a new FAQ |
+| POST | `/faq/:id/reply` | Authenticated | Add a reply to a FAQ |
+| PUT | `/faq/:id` | Admin only | Edit an existing FAQ |
+| DELETE | `/faq/:id` | Admin only | Delete a FAQ |
+
+---
+
+## 🖥 Pages & Routes
+
+| Path | Component | Access | Description |
+|------|-----------|--------|-------------|
+| `/` | `Home` | Public | Browse all FAQs |
+| `/login` | `Login` | Public | Google sign-in button |
+| `/auth/success` | `AuthSuccess` | Public | Captures JWT from URL, redirects |
+| `/dashboard` | `Dashboard` | Private | Navigation hub for the user |
+| `/add-faq` | `AddFAQ` | Private | Form to submit a new FAQ |
+| `/faq-replies` | `FAQReplies` | Private | View FAQs and post replies |
+| `/admin` | `AdminPanel` | Private (Admin) | Edit/delete all FAQs |
+
+> Private routes are protected by the `PrivateRoute` component, which redirects unauthenticated users to `/login`.
+
+---
+
+## 🔐 Authentication Flow
+
+```
+1. User clicks "Continue with Google"
+         ↓
+2. Browser navigates to GET /auth/google
+         ↓
+3. Passport redirects to Google OAuth consent screen
+         ↓
+4. Google redirects to GET /auth/google/callback
+         ↓
+5. Passport verifies profile; finds or creates User in MongoDB
+         ↓
+6. Server signs a JWT containing { id, name, email, role }
+         ↓
+7. Server redirects to: http://localhost:3000/auth/success?token=<JWT>
+         ↓
+8. AuthSuccess.js reads token from URL, saves to localStorage
+         ↓
+9. App.js reads token on load, fetches /auth/current-user to hydrate state
+         ↓
+10. All subsequent API calls send: Authorization: Bearer <JWT>
+```
+
+---
+
+## 👥 Role-Based Access Control
+
+| Feature | Student | Admin |
+|---------|---------|-------|
+| Browse FAQs (Home) | ✅ | ✅ |
+| Login with Google | ✅ | ✅ |
+| View Dashboard | ✅ | ✅ |
+| Add a FAQ | ✅ | ✅ |
+| Reply to a FAQ | ✅ | ✅ |
+| Edit any FAQ | ❌ | ✅ |
+| Delete any FAQ | ❌ | ✅ |
+| Access Admin Panel | ❌ | ✅ |
+
+> To make a user an admin, manually update their `role` field in MongoDB:
+> ```js
+> db.users.updateOne({ email: "user@example.com" }, { $set: { role: "admin" } })
+> ```
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+Make sure the following are installed on your machine:
+
+- [Node.js](https://nodejs.org/) (v16 or higher recommended)
+- [MongoDB Community Server](https://www.mongodb.com/try/download/community) (running locally on port `27017`)
+
+### Installation
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/patan-jamsheer/FAQ_project.git
+cd FAQ_project
+```
+
+**2. Install backend dependencies**
+
+```bash
+cd backend
+npm install
+```
+
+**3. Install frontend dependencies**
+
+```bash
+cd ../frontend
+npm install
+```
+
+### Environment Variables
+
+Create a `.env` file inside the `backend/` folder with the following:
+
+```env
+MONGO_URI=mongodb://localhost:27017/faqapp
+SESSION_SECRET=mysecretkey123
+PORT=5000
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+JWT_SECRET=myjwtsecretkey123
+```
+
+> **Note:** Google OAuth credentials (`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`) must be obtained from [Google Cloud Console](https://console.cloud.google.com/). The **Authorized redirect URI** must be set to:
+> ```
+> http://localhost:5000/auth/google/callback
+> ```
+
+### Running the App
+
+Open **two terminal windows**:
+
+**Terminal 1 — Start the backend**
+
+```bash
+cd backend
+node index.js
+```
+
+Expected output:
+```
+Server running on port 5000
+MongoDB connected
+```
+
+**Terminal 2 — Start the frontend**
+
+```bash
+cd frontend
+npm start
+```
+
+Then open your browser and go to:
+
+```
+http://localhost:3000
+```
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a new branch: `git checkout -b feature/your-feature-name`
+3. Commit your changes: `git commit -m "Add your feature"`
+4. Push to your branch: `git push origin feature/your-feature-name`
+5. Open a Pull Request
+
+---
+
+
+
+ 
+ 

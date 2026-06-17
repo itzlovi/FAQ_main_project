@@ -1,35 +1,65 @@
+// backend/utils/faqHelpers.js
 const FAQ = require('../models/FAQ');
 
-function normalizeText(text) {
-  return (text || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-}
+/**
+ * Sorensen-Dice Coefficient for normalized text similarity.
+ * Returns a value between 0 (no match) and 1 (identical).
+ */
+function getSimilarityScore(a, b) {
+  const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  const getBigrams = (str) => {
+    const bigrams = new Set();
+    for (let i = 0; i < str.length - 1; i++) {
+      bigrams.add(str.slice(i, i + 2));
+    }
+    return bigrams;
+  };
+  const s1 = normalize(a);
+  const s2 = normalize(b);
+  if (s1 === s2) return 1;
+  if (s1.length < 2 || s2.length < 2) return 0;
 
-function similarityScore(a, b) {
-  const wordsA = new Set(normalizeText(a).split(' ').filter(w => w.length > 2));
-  const wordsB = new Set(normalizeText(b).split(' ').filter(w => w.length > 2));
-  if (wordsA.size === 0 || wordsB.size === 0) return 0;
-  let overlap = 0;
-  wordsA.forEach(w => { if (wordsB.has(w)) overlap += 1; });
-  return overlap / Math.max(wordsA.size, wordsB.size);
+  const bigrams1 = getBigrams(s1);
+  const bigrams2 = getBigrams(s2);
+  let intersection = 0;
+  for (const bigram of bigrams1) {
+    if (bigrams2.has(bigram)) intersection++;
+  }
+  return (2 * intersection) / (bigrams1.size + bigrams2.size);
 }
 
 async function findSimilarFAQs(question, limit = 5) {
-  const normalized = normalizeText(question);
-  if (!normalized) return [];
+  const trimmed = (question || '').trim();
+  if (!trimmed) return [];
 
-  const candidates = await FAQ.find({
-    $or: [{ isApproved: true }, { status: 'approved' }]
-  })
-    .select('question answer isApproved status')
-    .limit(200)
-    .lean();
+  let candidates = [];
+  try {
+    // Try text-index search first (fast, DB-side)
+    candidates = await FAQ.find(
+      {
+        $text: { $search: trimmed },
+        $or: [{ isApproved: true }, { status: 'approved' }]
+      },
+      { score: { $meta: 'textScore' } }
+    )
+      .sort({ score: { $meta: 'textScore' } })
+      .limit(20) // Fetch more candidates for re-ranking
+      .lean();
+  } catch (_err) {
+    // Fallback: regex scan if text index hasn't built yet
+    const regex = new RegExp(trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    candidates = await FAQ.find(
+      { $or: [{ isApproved: true }, { status: 'approved' }], question: regex },
+      {}
+    ).limit(20).lean();
+  }
 
+  if (!candidates.length) return [];
+
+  // Re-rank using normalized Sorensen-Dice for accurate 0–1 scores
   return candidates
-    .map(faq => ({
-      ...faq,
-      score: similarityScore(question, faq.question)
-    }))
-    .filter(f => f.score >= 0.45)
+    .map(faq => ({ ...faq, score: getSimilarityScore(trimmed, faq.question) }))
+    .filter(faq => faq.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }
@@ -48,9 +78,10 @@ async function searchApprovedFAQs(query, limit = 5) {
       .lean();
     if (textResults.length > 0) return textResults;
   } catch (_) {
-    /* text index may not exist yet */
+    /* Handle missing text index silently */
   }
 
+  // Fallback to regex (less efficient, but works if indexes are building)
   const regex = new RegExp(trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
   return FAQ.find({
     isApproved: true,
@@ -61,4 +92,4 @@ async function searchApprovedFAQs(query, limit = 5) {
     .lean();
 }
 
-module.exports = { normalizeText, similarityScore, findSimilarFAQs, searchApprovedFAQs };
+module.exports = { findSimilarFAQs, searchApprovedFAQs, getSimilarityScore };
